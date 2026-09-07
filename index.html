@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>本影、半影與偽本影 模擬網頁 (幾何修復版)</title>
+    <title>本影、半影與偽本影 模擬網頁</title>
     <style>
         * {
             box-sizing: border-box;
@@ -106,9 +106,10 @@
 
     <h1>本影、半影與偽本影</h1>
     <p class="desc">
-        
-        • <b>紅色實線</b>：頂點至頂點，定義<b>本影 Cone</b>與<b>偽本影 Cone</b>。<br>
-        • <b>黃色虛線</b>：光源上連至障礙物下、光源下連至障礙物上，邊界外側即為<b>半影區</b>。
+
+        • <b>紅色實線</b>：頂點至頂點，定義<b>本影</b>與<b>偽本影</b>。<br>
+        • <b>黃色虛線</b>：光源上連至障礙物下、光源下連至障礙物上，邊界外側即為<b>半影區</b>。<br>
+        • 調整<b>「觀測點垂直高度 (Y)」</b>，將觀測點移至黃色的<b>半影區</b>，下方視角即可觀察到<b>偏食</b>。
     </p>
 
     <div class="container">
@@ -132,8 +133,8 @@
         <div class="view-panel">
             <canvas id="eclipseCanvas" width="100" height="100"></canvas>
             <div>
-                <h3 style="color: #4da6ff; margin-bottom: 5px;">螢幕中心點視角</h3>
-                <p id="eclipseStatus" style="color: #ccc; font-size: 14px;">顯示從螢幕中央向光源看過去的遮檔情況</p>
+                <h3 style="color: #4da6ff; margin-bottom: 5px;">觀測點視角 (綠色標記處)</h3>
+                <p id="eclipseStatus" style="color: #ccc; font-size: 14px;">顯示該觀測點看過去的光源被遮擋狀況</p>
             </div>
         </div>
 
@@ -150,6 +151,10 @@
                 <label id="screenXLabel">螢幕位置 (X): 750px</label>
                 <input type="range" id="screenXInput" min="400" max="830" value="750">
             </div>
+            <div class="control-group">
+                <label id="screenYLabel">觀測點高度 (Y): 190px</label>
+                <input type="range" id="screenYInput" min="20" max="360" value="190">
+            </div>
         </div>
     </div>
 
@@ -163,15 +168,18 @@
         const lightSizeInput = document.getElementById('lightSize');
         const objSizeInput = document.getElementById('objSize');
         const screenXInput = document.getElementById('screenXInput');
+        const screenYInput = document.getElementById('screenYInput');
 
         const lightSizeLabel = document.getElementById('lightSizeLabel');
         const objSizeLabel = document.getElementById('objSizeLabel');
         const screenXLabel = document.getElementById('screenXLabel');
+        const screenYLabel = document.getElementById('screenYLabel');
         const eclipseStatus = document.getElementById('eclipseStatus');
 
         let light = { x: 120, y: 190, r: 60 };
         let obstacle = { x: 380, y: 190, r: 25 };
         let screenX = 750;
+        let obsY = 190; // 螢幕上的觀測點 Y 座標
 
         let isDragging = null;
 
@@ -193,6 +201,12 @@
             draw();
         });
 
+        screenYInput.addEventListener('input', (e) => {
+            obsY = parseInt(e.target.value);
+            screenYLabel.innerText = `觀測點高度 (Y): ${obsY}px`;
+            draw();
+        });
+
         canvas.addEventListener('mousedown', (e) => {
             const rect = canvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
@@ -203,7 +217,12 @@
             } else if (Math.hypot(mouseX - obstacle.x, mouseY - obstacle.y) < obstacle.r + 10) {
                 isDragging = 'obstacle';
             } else if (Math.abs(mouseX - screenX) < 15) {
-                isDragging = 'screen';
+                // 如果點擊靠近觀測點十字，拖曳 Y
+                if (Math.abs(mouseY - obsY) < 20) {
+                    isDragging = 'obsPoint';
+                } else {
+                    isDragging = 'screen';
+                }
             }
         });
 
@@ -221,13 +240,16 @@
                 screenX = Math.min(Math.max(obstacle.x + obstacle.r + 20, mouseX), canvas.width - 20);
                 screenXInput.value = screenX;
                 screenXLabel.innerText = `螢幕位置 (X): ${screenX}px`;
+            } else if (isDragging === 'obsPoint') {
+                obsY = Math.min(Math.max(10, mouseY), canvas.height - 10);
+                screenYInput.value = obsY;
+                screenYLabel.innerText = `觀測點高度 (Y): ${obsY}px`;
             }
             draw();
         });
 
         window.addEventListener('mouseup', () => { isDragging = null; });
 
-        // 兩點連線延伸至目標 X 座標
         function getRayPointAtX(p1, p2, targetX) {
             const dx = p2.x - p1.x;
             const dy = p2.y - p1.y;
@@ -242,8 +264,7 @@
             const d = obstacle.x - light.x; 
             const maxX = canvas.width;
 
-            // 1. 計算【外公切線】(紅色實線: 本影 & 偽本影)
-            // sin(alpha) = (R - r) / d
+            // 1. 計算【外公切線】
             const sinAlpha = (light.r - obstacle.r) / d;
             const cosAlpha = Math.sqrt(Math.max(0, 1 - sinAlpha * sinAlpha));
 
@@ -256,38 +277,27 @@
             const outerTopEnd = getRayPointAtX(lightOuterTop, obsOuterTop, maxX);
             const outerBotEnd = getRayPointAtX(lightOuterBot, obsOuterBot, maxX);
 
-            // 本影頂點 (Apex)
             let apexX = maxX + 1000;
             if (light.r > obstacle.r) {
                 apexX = light.x + (light.r * d) / (light.r - obstacle.r);
             }
 
-            // 2. 計算【內公切線 / 交叉線】(黃色虛線: 半影外邊界)
-            // sin(beta) = (R + r) / d
+            // 2. 計算【內公切線 / 交叉線】
             const sinBeta = (light.r + obstacle.r) / d;
             const cosBeta = Math.sqrt(Math.max(0, 1 - sinBeta * sinBeta));
 
-            // 交叉 1: 光源【上切點】 -> 障礙物【下切點】
             const lightInnerTop = { x: light.x - light.r * sinBeta, y: light.y - light.r * cosBeta };
             const obsInnerBot   = { x: obstacle.x + obstacle.r * sinBeta, y: obstacle.y + obstacle.r * cosBeta };
 
-            // 交叉 2: 光源【下切點】 -> 障礙物【上切點】
             const lightInnerBot = { x: light.x - light.r * sinBeta, y: light.y + light.r * cosBeta };
             const obsInnerTop   = { x: obstacle.x + obstacle.r * sinBeta, y: obstacle.y - obstacle.r * cosBeta };
 
-            // 交叉內切線延伸至畫布最右側
-            // 注意：lightInnerTop 經由 obsInnerBot 延伸後會發散到【畫布下方】
             const innerBotEnd = getRayPointAtX(lightInnerTop, obsInnerBot, maxX);
-            // 注意：lightInnerBot 經由 obsInnerTop 延伸後會發散到【畫布上方】
             const innerTopEnd = getRayPointAtX(lightInnerBot, obsInnerTop, maxX);
 
-
             // 3. 繪製【影子區域色彩】
-
-            // A. 半影區 (Penumbra) - 夾在黃色交叉延伸線與紅色外切線之間
+            // A. 半影區 (Penumbra)
             ctx.fillStyle = 'rgba(255, 255, 100, 0.18)';
-            
-            // 上半半影：從障礙物上邊界開展 (界於紅色 outerTop 與 黃色 innerTop 之間)
             ctx.beginPath();
             ctx.moveTo(obsOuterTop.x, obsOuterTop.y);
             ctx.lineTo(outerTopEnd.x, outerTopEnd.y);
@@ -296,7 +306,6 @@
             ctx.closePath();
             ctx.fill();
 
-            // 下半半影：從障礙物下邊界開展 (界於紅色 outerBot 與 黃色 innerBot 之間)
             ctx.beginPath();
             ctx.moveTo(obsOuterBot.x, obsOuterBot.y);
             ctx.lineTo(outerBotEnd.x, outerBotEnd.y);
@@ -320,7 +329,7 @@
                 ctx.closePath();
                 ctx.fill();
 
-                // C. 偽本影區 (Antumbra) - 本影頂點往後的反向錐形
+                // C. 偽本影區 (Antumbra)
                 if (apexX < maxX) {
                     ctx.fillStyle = 'rgba(0, 180, 255, 0.4)';
                     ctx.beginPath();
@@ -332,11 +341,8 @@
                 }
             }
 
-
             // 4. 繪製【切線結構線】
             ctx.lineWidth = 1.2;
-
-            // [紅色實線] 外公切線：定義本影與偽本影
             ctx.strokeStyle = 'rgba(255, 80, 80, 0.9)';
             ctx.beginPath();
             ctx.moveTo(lightOuterTop.x, lightOuterTop.y);
@@ -345,37 +351,31 @@
             ctx.lineTo(outerBotEnd.x, outerBotEnd.y);
             ctx.stroke();
 
-            // [黃色虛線] 交叉內公切線：定義半影外界 (呈現 X 型交叉)
             ctx.setLineDash([5, 5]);
             ctx.strokeStyle = 'rgba(255, 255, 120, 0.9)';
             ctx.beginPath();
-            // 交叉線 1: 光源上 -> 障礙物下 -> 延伸至下方右側
             ctx.moveTo(lightInnerTop.x, lightInnerTop.y);
             ctx.lineTo(innerBotEnd.x, innerBotEnd.y);
-            // 交叉線 2: 光源下 -> 障礙物上 -> 延伸至上方右側
             ctx.moveTo(lightInnerBot.x, lightInnerBot.y);
             ctx.lineTo(innerTopEnd.x, innerTopEnd.y);
             ctx.stroke();
+            ctx.setLineDash([]);
 
-            ctx.setLineDash([]); // 恢復實線
-
-            // 標示本影頂點 (Apex)
-            if (light.r > obstacle.r && apexX < maxX) {
-                ctx.fillStyle = '#ff3333';
-                ctx.beginPath();
-                ctx.arc(apexX, light.y, 4, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.font = '12px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText("本影頂點", apexX, light.y - 10);
-            }
-
-            // 5. 繪製螢幕與實體物體
+            // 5. 繪製螢幕與觀測點
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(screenX - 2, 0, 4, canvas.height);
             ctx.fillText("螢幕", screenX - 10, canvas.height - 10);
 
-            // 光源
+            // 在螢幕上繪製綠色觀測點十字 (觀測點)
+            ctx.strokeStyle = '#00ff66';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(screenX, obsY, 6, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = '#00ff66';
+            ctx.fillText("觀測點", screenX - 45, obsY + 4);
+
+            // 光源與障礙物
             ctx.beginPath();
             ctx.arc(light.x, light.y, light.r, 0, Math.PI * 2);
             ctx.fillStyle = '#ffea75';
@@ -387,7 +387,6 @@
             ctx.textAlign = 'center';
             ctx.fillText("光源", light.x, light.y + 4);
 
-            // 障礙物
             ctx.beginPath();
             ctx.arc(obstacle.x, obstacle.y, obstacle.r, 0, Math.PI * 2);
             ctx.fillStyle = '#444';
@@ -398,37 +397,68 @@
             ctx.fillStyle = '#fff';
             ctx.fillText("障礙物", obstacle.x, obstacle.y + 4);
 
-            updateEclipseView(apexX);
+            updateEclipseView();
         }
 
-        function updateEclipseView(apexX) {
+        // 準確計算從觀測點 (screenX, obsY) 看過去的角度與視徑
+        function updateEclipseView() {
             eCtx.clearRect(0, 0, eclipseCanvas.width, eclipseCanvas.height);
-            const cx = 50, cy = 50;
 
-            const distLight = screenX - light.x;
-            const distObs = screenX - obstacle.x;
+            const obsPt = { x: screenX, y: obsY };
 
-            const apparentLightR = (light.r / distLight) * 350;
-            const apparentObsR = (obstacle.r / distObs) * 350;
+            // 觀測點至光源中心與障礙物中心的距離與向量
+            const dxL = light.x - obsPt.x;
+            const dyL = light.y - obsPt.y;
+            const distL = Math.hypot(dxL, dyL);
 
+            const dxO = obstacle.x - obsPt.x;
+            const dyO = obstacle.y - obsPt.y;
+            const distO = Math.hypot(dxO, dyO);
+
+            // 計算視半徑 (Apparent Radius)
+            const appR_light = (light.r / distL) * 350;
+            const appR_obs = (obstacle.r / distO) * 350;
+
+            // 計算兩者中心在視角平面上的相對偏離量 (Offset)
+            const angleL = Math.atan2(dyL, dxL);
+            const angleO = Math.atan2(dyO, dxO);
+            let dAngle = angleO - angleL;
+
+            // 視角轉換為 2D 小圓畫布像素點
+            const scale = 350;
+            const offsetCanvasX = Math.cos(dAngle) * distO * (scale / distO) - scale; 
+            const offsetCanvasY = Math.sin(dAngle) * scale;
+
+            const cxL = 50, cyL = 50;
+            const cxO = cxL + offsetCanvasX;
+            const cyO = cyL + offsetCanvasY;
+
+            // 繪製太陽 (光源)
             eCtx.beginPath();
-            eCtx.arc(cx, cy, apparentLightR, 0, Math.PI * 2);
+            eCtx.arc(cxL, cyL, appR_light, 0, Math.PI * 2);
             eCtx.fillStyle = '#ffea75';
             eCtx.fill();
 
+            // 繪製月球 (障礙物)
             eCtx.beginPath();
-            eCtx.arc(cx, cy, apparentObsR, 0, Math.PI * 2);
+            eCtx.arc(cxO, cyO, appR_obs, 0, Math.PI * 2);
             eCtx.fillStyle = '#111111';
             eCtx.fill();
-            eCtx.strokeStyle = '#555';
+            eCtx.strokeStyle = '#666';
+            eCtx.lineWidth = 1;
             eCtx.stroke();
 
-            if (screenX < apexX) {
-                eclipseStatus.innerHTML = "<b style='color:#ff4d4d;'>【本影區 - 全食】</b><br>光源被完全遮擋，中央全黑。";
-            } else if (Math.abs(screenX - apexX) < 5) {
-                eclipseStatus.innerHTML = "<b style='color:#ffaa00;'>【本影頂點】</b><br>障礙物大小剛好等於光源。";
+            // 計算兩圓心距離以判定食象
+            const centerDist = Math.hypot(cxO - cxL, cyO - cyL);
+
+            if (centerDist >= appR_light + appR_obs) {
+                eclipseStatus.innerHTML = "<b style='color:#00ff66;'>【偏食外 / 未偏食】</b><br>觀測點處於完全亮區，太陽未被遮擋。";
+            } else if (centerDist + appR_obs <= appR_light && appR_obs < appR_light) {
+                eclipseStatus.innerHTML = "<b style='color:#00d2ff;'>【偽本影區 - 環食】</b><br>障礙物完全浸入光源視角內，形成光環。";
+            } else if (centerDist + appR_light <= appR_obs) {
+                eclipseStatus.innerHTML = "<b style='color:#ff4d4d;'>【本影區 - 全食】</b><br>光源被完全遮蔽，出現日全食。";
             } else {
-                eclipseStatus.innerHTML = "<b style='color:#00d2ff;'>【偽本影區 - 環食】</b><br>障礙物視角小於光源，邊緣露出一圈光環。";
+                eclipseStatus.innerHTML = "<b style='color:#ffaa00;'>【半影區 - 偏食】</b><br>障礙物遮擋部分光源，呈現缺角的<b>日偏食</b>！";
             }
         }
 
